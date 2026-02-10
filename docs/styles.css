@@ -1,0 +1,69 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #1f1f24;
+  color: #f6f6f8;
+}
+
+.layout {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+h1 {
+  margin-bottom: 0.25rem;
+}
+
+.controls {
+  display: grid;
+  gap: 0.8rem;
+  margin-block: 1rem;
+}
+
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+button {
+  border: 1px solid #555;
+  background: #292a31;
+  color: inherit;
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
+}
+
+button.active {
+  background: #7d31aa;
+  border-color: #c878ff;
+}
+
+.stage-wrap {
+  border: 1px solid #474751;
+  border-radius: 0.6rem;
+  background: #0f0f14;
+  padding: 0.8rem;
+  width: fit-content;
+}
+
+#stage {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  width: 220px;
+  height: 220px;
+}
+
+pre {
+  max-height: 320px;
+  overflow: auto;
+  background: #16171d;
+  padding: 0.7rem;
+  border-radius: 0.45rem;
+}

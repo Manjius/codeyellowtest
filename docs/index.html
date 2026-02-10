@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tao Pai Pai Sprite Lab</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <header>
+        <h1>Tao Pai Pai Sprite Lab</h1>
+        <p>
+          This page auto-detects every sprite from the provided sheet and groups frames into animation rows. Choose an action button to play it.
+        </p>
+      </header>
+
+      <section class="controls">
+        <div id="actionButtons" class="action-buttons" aria-label="Animation actions"></div>
+        <label>
+          Speed
+          <input id="speed" type="range" min="40" max="350" value="120" step="10" />
+          <span id="speedValue">120ms</span>
+        </label>
+      </section>
+
+      <section class="stage-wrap">
+        <canvas id="stage" width="220" height="220" aria-label="Sprite animation preview"></canvas>
+      </section>
+
+      <details>
+        <summary>Detected sprite metadata</summary>
+        <pre id="meta"></pre>
+      </details>
+    </main>
+
+    <script src="sprite-sheet-data.js"></script>
+    <script src="sprite-lab.js"></script>
+  </body>
+</html>
