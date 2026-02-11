@@ -18,7 +18,11 @@ const state = {
   sheet: null,
 };
 
-function pixelIsBackground(r, g, b, bg, tolerance = 10) {
+function isBgPixel(data, width, x, y, bg, tolerance = 0) {
+  const p = (y * width + x) * 4;
+  const r = data[p];
+  const g = data[p + 1];
+  const b = data[p + 2];
   return (
     Math.abs(r - bg[0]) <= tolerance
     && Math.abs(g - bg[1]) <= tolerance
@@ -26,121 +30,114 @@ function pixelIsBackground(r, g, b, bg, tolerance = 10) {
   );
 }
 
-function buildMonochromeMasks(imageData, bg) {
-  const { data, width, height } = imageData;
-  const rowIsMono = new Array(height).fill(true);
-  const colIsMono = new Array(width).fill(true);
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const p = (y * width + x) * 4;
-      const r = data[p];
-      const g = data[p + 1];
-      const b = data[p + 2];
-      const a = data[p + 3];
-      const isBg = a === 0 || pixelIsBackground(r, g, b, bg);
-      if (!isBg) {
-        rowIsMono[y] = false;
-        colIsMono[x] = false;
-      }
+function rowIsUniformBg(data, width, y, bg, tolerance) {
+  for (let x = 0; x < width; x += 1) {
+    if (!isBgPixel(data, width, x, y, bg, tolerance)) {
+      return false;
     }
   }
-
-  return { rowIsMono, colIsMono };
+  return true;
 }
 
-function getRuns(mask, targetValue) {
-  const runs = [];
-  let start = -1;
-
-  for (let i = 0; i < mask.length; i += 1) {
-    if (mask[i] === targetValue && start === -1) {
-      start = i;
-    }
-    if (mask[i] !== targetValue && start !== -1) {
-      runs.push([start, i - 1]);
-      start = -1;
+function colIsUniformBg(data, width, y1, y2, x, bg, tolerance) {
+  for (let y = y1; y <= y2; y += 1) {
+    if (!isBgPixel(data, width, x, y, bg, tolerance)) {
+      return false;
     }
   }
-
-  if (start !== -1) {
-    runs.push([start, mask.length - 1]);
-  }
-
-  return runs;
+  return true;
 }
 
-function splitByMonochromeMidlines(contentRuns, dividerRuns, maxLimit) {
-  if (contentRuns.length === 0) {
-    return [];
-  }
+function detectRowSegments(data, width, height, bg, tolerance = 0) {
+  const rows = [];
+  let y = 0;
 
-  const boundaries = [contentRuns[0][0]];
+  while (y < height) {
+    while (y < height && rowIsUniformBg(data, width, y, bg, tolerance)) {
+      y += 1;
+    }
+    if (y >= height) {
+      break;
+    }
 
-  for (let i = 0; i < contentRuns.length - 1; i += 1) {
-    const leftEnd = contentRuns[i][1];
-    const rightStart = contentRuns[i + 1][0];
+    const start = y;
 
-    const divider = dividerRuns.find(([a, b]) => a <= rightStart && b >= leftEnd);
-    const mid = divider ? Math.floor((divider[0] + divider[1]) / 2) : Math.floor((leftEnd + rightStart) / 2);
-    boundaries.push(mid);
-  }
+    while (y < height && !rowIsUniformBg(data, width, y, bg, tolerance)) {
+      y += 1;
+    }
 
-  boundaries.push(contentRuns[contentRuns.length - 1][1]);
+    let end;
+    if (y >= height) {
+      end = height - 1;
+    } else {
+      end = Math.min(height - 1, y + 2);
+      y = end + 1;
+    }
 
-  const segments = [];
-  for (let i = 0; i < contentRuns.length; i += 1) {
-    const x1 = i === 0 ? boundaries[0] : boundaries[i] + 1;
-    const x2 = i === contentRuns.length - 1 ? boundaries[boundaries.length - 1] : boundaries[i + 1];
-    if (x2 >= x1 && x1 >= 0 && x2 <= maxLimit) {
-      segments.push([x1, x2]);
+    if (end - start + 1 >= 12) {
+      rows.push([start, end]);
     }
   }
 
-  return segments;
+  return rows;
 }
 
-function extractSpritesByGrid(img) {
+function detectColSegments(data, width, y1, y2, bg, tolerance = 0) {
+  const cols = [];
+  let x = 0;
+
+  while (x < width) {
+    while (x < width && colIsUniformBg(data, width, y1, y2, x, bg, tolerance)) {
+      x += 1;
+    }
+    if (x >= width) {
+      break;
+    }
+
+    const start = x;
+
+    while (x < width && !colIsUniformBg(data, width, y1, y2, x, bg, tolerance)) {
+      x += 1;
+    }
+
+    let end;
+    if (x >= width) {
+      end = width - 1;
+    } else {
+      end = Math.min(width - 1, x + 2);
+      x = end + 1;
+    }
+
+    if (end - start + 1 >= 8) {
+      cols.push([start, end]);
+    }
+  }
+
+  return cols;
+}
+
+function extractActions(img) {
   const off = document.createElement('canvas');
   off.width = img.width;
   off.height = img.height;
   const offCtx = off.getContext('2d', { willReadFrequently: true });
   offCtx.drawImage(img, 0, 0);
 
-  const imageData = offCtx.getImageData(0, 0, img.width, img.height);
-  const { data, width, height } = imageData;
+  const { data, width, height } = offCtx.getImageData(0, 0, img.width, img.height);
   const bg = [data[0], data[1], data[2]];
 
-  const { rowIsMono } = buildMonochromeMasks(imageData, bg);
-  const monoRowRuns = getRuns(rowIsMono, true).filter(([a, b]) => (b - a + 1) >= 2);
-  const rowContentRuns = getRuns(rowIsMono, false);
-  const rowSegments = splitByMonochromeMidlines(rowContentRuns, monoRowRuns, height - 1)
-    .filter(([y1, y2]) => (y2 - y1 + 1) >= 12);
+  let rowSegments = detectRowSegments(data, width, height, bg, 0);
+  if (rowSegments.length === 0) {
+    rowSegments = detectRowSegments(data, width, height, bg, 8);
+  }
 
   const actions = [];
 
   rowSegments.forEach(([y1, y2], rowIndex) => {
-    const colIsMonoInRow = new Array(width).fill(true);
-
-    for (let x = 0; x < width; x += 1) {
-      for (let y = y1; y <= y2; y += 1) {
-        const p = (y * width + x) * 4;
-        const r = data[p];
-        const g = data[p + 1];
-        const b = data[p + 2];
-        const a = data[p + 3];
-        const isBg = a === 0 || pixelIsBackground(r, g, b, bg);
-        if (!isBg) {
-          colIsMonoInRow[x] = false;
-          break;
-        }
-      }
+    let colSegments = detectColSegments(data, width, y1, y2, bg, 0);
+    if (colSegments.length === 0) {
+      colSegments = detectColSegments(data, width, y1, y2, bg, 8);
     }
-
-    const monoColRuns = getRuns(colIsMonoInRow, true).filter(([a, b]) => (b - a + 1) >= 2);
-    const colContentRuns = getRuns(colIsMonoInRow, false);
-    const colSegments = splitByMonochromeMidlines(colContentRuns, monoColRuns, width - 1)
-      .filter(([x1, x2]) => (x2 - x1 + 1) >= 8);
 
     const frames = colSegments.map(([x1, x2]) => ({
       x: x1,
@@ -157,7 +154,7 @@ function extractSpritesByGrid(img) {
     }
   });
 
-  return actions;
+  return { actions, bg };
 }
 
 function drawFrame(frame) {
@@ -212,10 +209,12 @@ async function init() {
   await img.decode();
   state.sheet = img;
 
-  state.actions = extractSpritesByGrid(img);
+  const result = extractActions(img);
+  state.actions = result.actions;
 
   meta.textContent = JSON.stringify({
-    source: 'monochrome row/column dividers',
+    source: 'scan same-rgb line -> different -> same line, cut at +2',
+    backgroundRgb: result.bg,
     totalActions: state.actions.length,
     actions: state.actions.map((action) => ({
       name: action.name,
