@@ -18,192 +18,55 @@ const state = {
   sheet: null,
 };
 
-function detectBackgroundColor(data, width, height) {
-  // JPEG compression means "same color" lines are rarely byte-identical.
-  // Use border sampling + quantized dominant color as stable background reference.
-  const bins = new Map();
-
-  function pushPixel(x, y) {
-    const p = (y * width + x) * 4;
-    const r = data[p];
-    const g = data[p + 1];
-    const b = data[p + 2];
-
-    const qr = Math.round(r / 8) * 8;
-    const qg = Math.round(g / 8) * 8;
-    const qb = Math.round(b / 8) * 8;
-    const key = `${qr},${qg},${qb}`;
-
-    if (!bins.has(key)) {
-      bins.set(key, { count: 0, sumR: 0, sumG: 0, sumB: 0 });
-    }
-    const entry = bins.get(key);
-    entry.count += 1;
-    entry.sumR += r;
-    entry.sumG += g;
-    entry.sumB += b;
-  }
-
-  for (let x = 0; x < width; x += 1) {
-    pushPixel(x, 0);
-    pushPixel(x, height - 1);
-  }
-  for (let y = 1; y < height - 1; y += 1) {
-    pushPixel(0, y);
-    pushPixel(width - 1, y);
-  }
-
-  let best = null;
-  for (const entry of bins.values()) {
-    if (!best || entry.count > best.count) {
-      best = entry;
-    }
-  }
-
-  return [
-    Math.round(best.sumR / best.count),
-    Math.round(best.sumG / best.count),
-    Math.round(best.sumB / best.count),
-  ];
-}
-
-function isBgPixel(data, width, x, y, bg, tolerance = 22) {
-  const p = (y * width + x) * 4;
-  const r = data[p];
-  const g = data[p + 1];
-  const b = data[p + 2];
-  return (
-    Math.abs(r - bg[0]) <= tolerance
-    && Math.abs(g - bg[1]) <= tolerance
-    && Math.abs(b - bg[2]) <= tolerance
-  );
-}
-
-function rowIsUniformBg(data, width, y, bg, tolerance) {
-  let bgCount = 0;
-  for (let x = 0; x < width; x += 1) {
-    if (isBgPixel(data, width, x, y, bg, tolerance)) {
-      bgCount += 1;
-    }
-  }
-  return (bgCount / width) >= 0.995;
-}
-
-function colIsUniformBg(data, width, y1, y2, x, bg, tolerance) {
-  let bgCount = 0;
-  const total = y2 - y1 + 1;
-
-  for (let y = y1; y <= y2; y += 1) {
-    if (isBgPixel(data, width, x, y, bg, tolerance)) {
-      bgCount += 1;
-    }
-  }
-
-  return (bgCount / total) >= 0.995;
-}
-
-function detectRowSegments(data, width, height, bg, tolerance = 22) {
-  const rows = [];
-  let y = 0;
-
-  while (y < height) {
-    while (y < height && rowIsUniformBg(data, width, y, bg, tolerance)) {
-      y += 1;
-    }
-    if (y >= height) {
-      break;
-    }
-
-    const start = y;
-
-    while (y < height && !rowIsUniformBg(data, width, y, bg, tolerance)) {
-      y += 1;
-    }
-
-    let end;
-    if (y >= height) {
-      end = height - 1;
-    } else {
-      // User rule: when we hit the next same-color line, cut at +2.
-      end = Math.min(height - 1, y + 2);
-      y = end + 1;
-    }
-
-    if (end - start + 1 >= 12) {
-      rows.push([start, end]);
-    }
-  }
-
-  return rows;
-}
-
-function detectColSegments(data, width, y1, y2, bg, tolerance = 22) {
-  const cols = [];
-  let x = 0;
-
-  while (x < width) {
-    while (x < width && colIsUniformBg(data, width, y1, y2, x, bg, tolerance)) {
-      x += 1;
-    }
-    if (x >= width) {
-      break;
-    }
-
-    const start = x;
-
-    while (x < width && !colIsUniformBg(data, width, y1, y2, x, bg, tolerance)) {
-      x += 1;
-    }
-
-    let end;
-    if (x >= width) {
-      end = width - 1;
-    } else {
-      // User rule: cut column at +2.
-      end = Math.min(width - 1, x + 2);
-      x = end + 1;
-    }
-
-    if (end - start + 1 >= 8) {
-      cols.push([start, end]);
-    }
-  }
-
-  return cols;
-}
-
 function extractActions(img) {
-  const off = document.createElement('canvas');
-  off.width = img.width;
-  off.height = img.height;
-  const offCtx = off.getContext('2d', { willReadFrequently: true });
-  offCtx.drawImage(img, 0, 0);
+  const width = img.width;
+  const height = img.height;
 
-  const { data, width, height } = offCtx.getImageData(0, 0, img.width, img.height);
-  const bg = detectBackgroundColor(data, width, height);
+  const totalColumns = 16;
+  const totalRows = 23;
 
-  const rowSegments = detectRowSegments(data, width, height, bg, 22);
-  const actions = [];
+  const baseCellW = Math.floor(width / totalColumns);
+  const baseCellH = Math.floor(height / totalRows);
+  const extraW = width % totalColumns;
+  const extraH = height % totalRows;
 
-  rowSegments.forEach(([y1, y2], rowIndex) => {
-    const colSegments = detectColSegments(data, width, y1, y2, bg, 22);
+  const columnBounds = [];
+  let xCursor = 0;
+  for (let col = 0; col < totalColumns; col += 1) {
+    const w = baseCellW + (col < extraW ? 1 : 0);
+    columnBounds.push([xCursor, xCursor + w - 1]);
+    xCursor += w;
+  }
 
-    const frames = colSegments.map(([x1, x2]) => ({
+  const rowBounds = [];
+  let yCursor = 0;
+  for (let row = 0; row < totalRows; row += 1) {
+    const h = baseCellH + (row < extraH ? 1 : 0);
+    rowBounds.push([yCursor, yCursor + h - 1]);
+    yCursor += h;
+  }
+
+  const actions = rowBounds.map(([y1, y2], rowIndex) => ({
+    name: `Row ${String(rowIndex + 1).padStart(2, '0')}`,
+    frames: columnBounds.map(([x1, x2]) => ({
       x: x1,
       y: y1,
       w: x2 - x1 + 1,
       h: y2 - y1 + 1,
-    }));
+    })),
+  }));
 
-    if (frames.length >= 2) {
-      actions.push({
-        name: `Row ${String(rowIndex + 1).padStart(2, '0')}`,
-        frames,
-      });
-    }
-  });
-
-  return { actions, bg };
+  return {
+    actions,
+    grid: {
+      rows: totalRows,
+      columns: totalColumns,
+      cellWidth: baseCellW,
+      cellHeight: baseCellH,
+      extraWidthPixels: extraW,
+      extraHeightPixels: extraH,
+    },
+  };
 }
 
 function drawFrame(frame) {
@@ -262,8 +125,8 @@ async function init() {
   state.actions = result.actions;
 
   meta.textContent = JSON.stringify({
-    source: 'scan same-rgb line -> different -> same line, cut at +2',
-    backgroundRgb: result.bg,
+    source: 'fixed grid split (23 rows x 16 columns)',
+    grid: result.grid,
     totalActions: state.actions.length,
     actions: state.actions.map((action) => ({
       name: action.name,
